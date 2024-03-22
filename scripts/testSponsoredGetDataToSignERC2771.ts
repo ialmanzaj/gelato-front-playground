@@ -20,7 +20,7 @@ const signer = new ethers.Wallet(process.env.PRIVATE_KEY as string, provider);
 const relay = new GelatoRelay();
 
 const testSponsoredGetDataToSignERC2771 = async () => {
-  const counter = "0x00172f67db60E5fA346e599cdE675f0ca213b47b";
+  const counter = "0x152742a6B2576059152466353915338b08df056d";
   const abi = ["function increment()"];
 
   const user = await signer.getAddress();

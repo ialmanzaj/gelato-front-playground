@@ -19,7 +19,7 @@ import {
 } from "@gelatonetwork/relay-sdk";
 import { fetchStatusPoll, fetchStatusSocket } from "./task";
 
-const GELATO_RELAY_API_KEY = "MxmKYCSQy3NdBPZE4b6YQn6r6bvmw5OPB5r3Rx1402k_"; // YOUR SPONSOR KEY
+const GELATO_RELAY_API_KEY = "dXNwSRUYh5Nql_U30Mg7gcXrlwH9ARfrejNSCl9uIzw_"; // YOUR SPONSOR KEY
 
 const App = () => {
   // these could potentially be unified into one provider
@@ -98,7 +98,7 @@ const App = () => {
 
   const sponsoredCallERC2771 = async () => {
     const relay = new GelatoRelay();
-    const counter = "0x00172f67db60E5fA346e599cdE675f0ca213b47b";
+    const counter = "0x152742a6B2576059152466353915338b08df056d";
     const abi = ["function increment()"];
 
     const signer = await provider!.getSigner();
@@ -133,7 +133,7 @@ const App = () => {
 
   const sponsoredCall = async () => {
     const relay = new GelatoRelay();
-    const counter = "0x00172f67db60E5fA346e599cdE675f0ca213b47b";
+    const counter = "0x152742a6B2576059152466353915338b08df056d";
     const abi = ["function increment()"];
 
     const chainId = (await provider!.getNetwork()).chainId;
