@@ -19,7 +19,7 @@ import {
 } from "@gelatonetwork/relay-sdk";
 import { fetchStatusPoll, fetchStatusSocket } from "./task";
 
-const GELATO_RELAY_API_KEY = "dXNwSRUYh5Nql_U30Mg7gcXrlwH9ARfrejNSCl9uIzw_"; // YOUR SPONSOR KEY
+const GELATO_RELAY_API_KEY = "Z44jSJzqFfBGBrAJkIjg5K6jZZXI22xBEsgimC7aSBY_"; // YOUR SPONSOR KEY
 
 const App = () => {
   // these could potentially be unified into one provider
@@ -90,10 +90,131 @@ const App = () => {
       case 3:
         callWithSyncFee();
         break;
+      case 4:
+        sponsoredCallERC2771Permit();
+        break;
       default:
         setLoading(false);
         break;
     }
+  };
+
+  function getTokenAbi() {
+    return [
+      "function nonces(address) view returns (uint256)",
+      "function name() view returns (string)",
+      "function permit(address owner, address spender, uint value, uint deadline, uint8 v, bytes32 r, bytes32 s) external",
+      "function transferFrom(address sender, address recipient, uint256 amount) external returns (bool)",
+    ];
+  }
+  const USDC = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
+
+  const doSign = async (
+    signer: ethers.Signer,
+    token: ethers.Contract,
+    value: ethers.BigNumberish,
+    owner: string,
+    spender: string,
+    deadline: number,
+    chainId: number
+  ): Promise<{ v: number; r: string; s: string } | null> => {
+    const domain: ethers.TypedDataDomain = {
+      name: await token.name(),
+      version: "2",
+      chainId: chainId,
+      verifyingContract: USDC,
+    };
+
+    const types = {
+      Permit: [
+        { name: "owner", type: "address" },
+        { name: "spender", type: "address" },
+        { name: "value", type: "uint256" },
+        { name: "nonce", type: "uint256" },
+        { name: "deadline", type: "uint256" },
+      ],
+    };
+
+    const nonce = await token.nonces(owner);
+    console.log("nonce", nonce.toString());
+
+    const data = {
+      owner,
+      spender,
+      value,
+      nonce: nonce.toString(), // Ensure nonce is a string to match the expected type
+      deadline,
+    };
+
+    // In Ethers.js v6, use `signTypedData` directly without underscore
+    const signature = await signer.signTypedData(domain, types, data);
+    const { v, r, s } = ethers.Signature.from(signature);
+
+    // `splitSignature` remains the same, it's a utility function to split the signature
+    return { v, r, s };
+  };
+
+  const sponsoredCallERC2771Permit = async () => {
+    setChainId({ name: "Sepolia", id: 11155111 });
+    const relay = new GelatoRelay();
+    const amount = 1000000;
+    const deadline = Math.floor(Date.now() / 1000) + 60 * 50;
+    const sender = "0x4803A57AeE38ACEf902db5871b66D7e5FE379A19";
+    const bob = "0x02C48c159FDfc1fC18BA0323D67061dE1dEA329F";
+    const abi = [
+      "function send(address sender,address receiver,uint256 amount,uint256 deadline,uint8 v,bytes32 r,bytes32 s) external",
+    ];
+
+    const signer = await provider!.getSigner();
+    const user = await signer.getAddress();
+
+    const usdc = new ethers.Contract(USDC, getTokenAbi(), signer);
+
+    // Generate the target payload
+    const senderContract = new ethers.Contract(sender, abi, signer);
+
+    const chainId = (await provider!.getNetwork()).chainId;
+    console.log("chainId", chainId);
+    const sig = (await doSign(
+      signer,
+      usdc,
+      amount,
+      signer.address, //owner
+      sender, //spender
+      deadline,
+      Number(chainId)
+    )) as ethers.Signature;
+    const { v, r, s } = sig;
+
+    const { data } = await senderContract.send.populateTransaction(
+      signer.address,
+      bob,
+      amount,
+      deadline,
+      v,
+      r,
+      s
+    );
+
+    // Populate a relay request
+    const request: CallWithERC2771Request = {
+      chainId,
+      target: sender,
+      data: data as string,
+      user: user as string,
+    };
+
+    relay.onTaskStatusUpdate((taskStatus: TransactionStatusResponse) => {
+      console.log("Task status update", taskStatus);
+      fetchStatusSocket(taskStatus, setMessage, setLoading);
+    });
+
+    const response = await relay.sponsoredCallERC2771(
+      request,
+      provider!,
+      GELATO_RELAY_API_KEY as string
+    );
+    console.log(`https://relay.gelato.digital/tasks/status/${response.taskId}`);
   };
 
   const sponsoredCallERC2771 = async () => {
@@ -161,22 +282,23 @@ const App = () => {
     const relayStatusWs = new WebSocket(
       "wss://api.gelato.digital/tasks/ws/status"
     );
-      relayStatusWs.onopen = (event) => {
-        relayStatusWs.send(
-          JSON.stringify({
-            action: "subscribe" as string,
-            taskId: response.taskId,
-          })
+    relayStatusWs.onopen = (event) => {
+      relayStatusWs.send(
+        JSON.stringify({
+          action: "subscribe" as string,
+          taskId: response.taskId,
+        })
+      );
+      relayStatusWs.onmessage = (event) => {
+        fetchStatusSocket(
+          JSON.parse(event.data).payload,
+          setMessage,
+          setLoading
         );
-        relayStatusWs.onmessage = (event) => {
-          fetchStatusSocket(JSON.parse(event.data).payload, setMessage, setLoading);
-        };
-      }
+      };
+    };
 
     console.log(`https://relay.gelato.digital/tasks/status/${response.taskId}`);
-
-  
-      
   };
 
   const callWithSyncFee = async () => {
@@ -344,6 +466,14 @@ const App = () => {
                         onUpdate={onUpdate}
                         text="callWithSyncFee"
                         action={3}
+                        max={max}
+                      />
+                      <Action
+                        ready={ready}
+                        onClick={onAction}
+                        onUpdate={onUpdate}
+                        text="sponsoredCallERC2771Permit"
+                        action={4}
                         max={max}
                       />
                     </div>
