@@ -14,6 +14,7 @@ import {
   CallWithSyncFeeERC2771Request,
   CallWithSyncFeeRequest,
   GelatoRelay,
+  ERC2771Type,
   SponsoredCallRequest,
   TransactionStatusResponse,
 } from "@gelatonetwork/relay-sdk";
@@ -109,8 +110,17 @@ const App = () => {
   }
   const USDC = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
 
+  type ISign = {
+    (
+      domain: ethers.TypedDataDomain,
+      types: Record<string, Array<ethers.TypedDataField>>,
+      // eslint-disable-next-line
+      value: Record<string, any>
+    ): Promise<string>;
+  };
+
   const doSign = async (
-    signer: ethers.Signer,
+    signTypedData: ISign,
     token: ethers.Contract,
     value: ethers.BigNumberish,
     owner: string,
@@ -147,7 +157,8 @@ const App = () => {
     };
 
     // In Ethers.js v6, use `signTypedData` directly without underscore
-    const signature = await signer.signTypedData(domain, types, data);
+    const signature = await signTypedData(domain, types, data);
+    console.log("signature 1-------", signature);
     const { v, r, s } = ethers.Signature.from(signature);
 
     // `splitSignature` remains the same, it's a utility function to split the signature
@@ -159,6 +170,7 @@ const App = () => {
     const relay = new GelatoRelay();
     const amount = 1000000;
     const deadline = Math.floor(Date.now() / 1000) + 60 * 50;
+    console.log("deadline", deadline);
     const sender = "0x4803A57AeE38ACEf902db5871b66D7e5FE379A19";
     const bob = "0x02C48c159FDfc1fC18BA0323D67061dE1dEA329F";
     const abi = [
@@ -168,6 +180,21 @@ const App = () => {
     const signer = await provider!.getSigner();
     const user = await signer.getAddress();
 
+    const signTypedData = async (
+      domain: ethers.TypedDataDomain,
+      types: Record<string, Array<ethers.TypedDataField>>,
+      value: Record<string, any>
+    ): Promise<string> => {
+      try {
+        const signature = await signer.signTypedData(domain, types, value);
+
+        return signature;
+      } catch (e) {
+        console.log(e);
+        throw new Error("Signature denied");
+      }
+    };
+
     const usdc = new ethers.Contract(USDC, getTokenAbi(), signer);
 
     // Generate the target payload
@@ -176,7 +203,7 @@ const App = () => {
     const chainId = (await provider!.getNetwork()).chainId;
     console.log("chainId", chainId);
     const sig = (await doSign(
-      signer,
+      signTypedData,
       usdc,
       amount,
       signer.address, //owner
@@ -184,6 +211,7 @@ const App = () => {
       deadline,
       Number(chainId)
     )) as ethers.Signature;
+
     const { v, r, s } = sig;
 
     const { data } = await senderContract.send.populateTransaction(
@@ -209,9 +237,31 @@ const App = () => {
       fetchStatusSocket(taskStatus, setMessage, setLoading);
     });
 
-    const response = await relay.sponsoredCallERC2771(
+    const { struct, typedData } = await relay.getDataToSignERC2771(
       request,
-      provider!,
+      ERC2771Type.SponsoredCall,
+      signer
+    );
+    console.log("struct getDataToSignERC2771", struct);
+    console.log("typedData getDataToSignERC2771", typedData);
+
+    const { EIP712Domain: _, ...types } = typedData.types as Record<
+      string,
+      Array<ethers.TypedDataField>
+    >;
+    console.log("types", types);
+
+    const signature = await signTypedData(
+      typedData.domain,
+      types,
+      typedData.message
+    );
+
+    console.log("signature 2------", signature);
+
+    const response = await relay.sponsoredCallERC2771WithSignature(
+      struct,
+      signature,
       GELATO_RELAY_API_KEY as string
     );
     console.log(`https://relay.gelato.digital/tasks/status/${response.taskId}`);
